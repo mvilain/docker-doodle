@@ -406,11 +406,253 @@ This makes container sizes smaller and puts the two sequences in a single Docker
 
 ## Avoid Golden Images (a horror story)
 
-- include everything (e.g. any installers neede) needed to build an application in to the Dockerfile. 
+- include everything (e.g. any installers neede) needed to build an 
+  application into the Dockerfile. 
 - build everything canonically from scratch
 - tag builds with git commit hash that built the image
 - use small base images (e.g. alpine)
 - for shared public images, build them from Dockerfiles **always**
 - don't leave passwords or access keys hidden in deep layers of images
 
-## Under the Hood
+## Docker, the program (under the hood)
+
+### What Kernels Do
+
+- respond to messages from hardware (e.g. interrupts)
+- start and schedule programs
+- control and organize storage
+- allocate and manage resources (memory, CPU, network)
+- pass messages between programs (network, IPC, and signals)
+
+### What is a Docker?
+
+- creates containers by configuring Linux cgroup, namespaces, and
+  copy-on-write filesystems to build images
+- client and server written in Go to manage Linux kernel features
+- makes scripting distributed systems easy
+- client/server connect via a socket (network or local file)
+- client & server can be same machine or separate or even it's own container 
+
+The following will run docker 4.0.1 client inside a container and connect it to 
+the docker server running on the host.  This shows that the docker server can be
+controlled from outside the host system.
+
+```bash
+    docker run -ti --rm -v /var/run/docker.sock:/var/run/docker.sock docker sh
+```
+
+### Docker Networking
+
+OSI Network model
+
+- layer 1 - physical - NIC or other network adapter
+- layer 2 - data link - data frames on wire or WiFi; node 2 node xfer via MAC address
+- layer 3 - network - packets move on a local network (IP, IPsec, ICMP)
+- layer 4 - transport - packets moved via protocol (TCP, UDP)
+- layer 5 - session - (part of TCP protocol) sockets
+- layer 6 - presentation - MIME, SSL/TLS
+- layer 7 - application - closest to user
+
+TCP/IP model
+
+- link layer - maps to data link layer
+- internet layer - subset of network layer
+- transport layer - glaceful close of session layer & transport layer
+- application layer - application, presentation, & session layers together
+
+Docker incorporates
+
+- link layer - ethernet or WiFi frames
+- internet layer - moves packets on local network
+- routing layer - routes packets between networks
+- ports - address of a programming running on a computer (ip and port#)
+
+Docker Networks
+
+- are bridges creates virtual network inside host
+- equivalent to software network switch controlling traffic
+- use data link (e.g. ethernet) layer
+
+`--net=host` gives the following full access to the host's network stack
+and allows full access to the system
+
+```bash
+    docker run -ti --rm --net=host ubuntu:16.04
+    # inside container
+    apt-get update && apt-get install -y bridge-utils net-tools 
+    brctl show
+    # do docker network create my-network in another session
+    brctl show # shows new bridge
+```
+
+Docker uses iptables to route traffic between the various bridges to and
+from containers. Note: iptables is not part of MacOS, but you can run it
+inside a container.
+
+```bash
+    docker run -it --rm --net=host --privileged=true ubuntu bash
+    # now inside container
+    apt-get update && apt-get install -y iptables
+    iptables -n -L -t nat # shows default entries
+    # run 2nd container in another session with some ports forwarded
+    # docker run -it --rm -p 8080:8080 ubuntu bash
+    iptables -n -L -t nat # shows additional entries for port 8080
+```
+This feature uses kernel Namespaces to provide processes with network 
+isolation. While bridges can be share network traffic among multiple 
+containers, namespaces isolate each container's networking stack so that
+other containers can't reconfigure it.
+
+### Docker processes and cgroups
+
+````bash
+    docker run -ti --rm --name hello --pid=host ubuntu bash
+    # another session shows the master PID running the container
+    docker inspect hello --format="{{.State.Pid}}" hello
+    # returns PID
+    # run superprivledged container
+    docker run -ti --rm --privileged=true --pid=host ubuntu bash
+    # inside container
+    kill PID # this will kill the other container
+````
+
+Docker uses cgroups to allow fine-grained control to CPU scheduling, 
+memory allocation, and other system resources.  They are **inherited** 
+and cumulative.  The container started with 800M of memory **shares** 
+that quota with all processes that run in the container (i.e. the sum 
+of all memory in the container by all processes can't exceed 800M).
+
+### Storage
+
+Kernel manages physical drives allowing reading/writing data to them.  
+
+Drives can be grouped logically to improve performance and redunancy 
+(e.g. RAID). 
+
+Filesystems structure physical drive(s) to allow for specific access to 
+data on a drive.  There are programs that can pretend to be filesystems
+(FUSE and NFS). Docker uses COWS (Copy On Write) filesystem which abstract
+containers into a base layer and additional R/O layers.  Additional writes
+in an active container write to an additonal layer (unless using a volume).
+
+The mechanism for managing COWS images depends on the underlaying OS. Some
+OS's use btrfs. Others use the built-in LVM or the overlay filesystem. A
+container is copied from a repository by gzipped layers. This makes them
+independent of the storage engine running on the Docker server.  But some
+storage engines have restrictions on the number of layers they can handle.
+So images build with a large number of layers on another system may not
+run on such machines.
+
+Docker volumes are part of the Linux VFS (Virtual File System). VFS allows
+attaching a directory in the filesystem to be attached and mounted.
+
+```bash
+    docker run -ti --rm --privileged=true ubuntu bash
+    mkdir -p example/work example/other-work
+    cd example/work
+    touch a b c d e f
+    cd ..
+    cd example/other-work
+    touch other-a other-b other-c other-d
+    cd ..
+    ls -R  # shows both directories and their files
+    mount -o bind other-work work # mount other-work/ OVER work/
+    ls -R  # shows both directories but the files in work aren't shown
+           # they're still there but other-work directory is hiding them
+           # this happens all the time with physical mounts
+    umount work
+    ls -R  # all the files are back
+```
+
+You must do the mount commands in the right order (e.g. first the 
+directory, then the folder).  Mounting Docker volumes **always** mounts
+the host's filesystem OVER the container's filesystem.
+
+## Docker Orchestration
+
+### Registries
+
+program run either as a container or installed.
+    
+- stores layers and images
+- listens on port 5000
+- requires cert if docker client run w/ default config
+- index and search tags
+- **must** setup authentication if exposing to a network
+    
+Official Docker registry https://docs.docker.com/registry
+
+```bash
+    docker tag ubuntu:14.04 localhost:5000/mycompany/my-ubuntu:99
+    docker push localhost:5000/mycompany/my-ubuntu:99
+    docker run -d -p 5000:5000 --restart=always registry registry:2
+```
+Nexus
+
+Stores containers:
+
+- Docker's dockerhub
+- AWS elastic container registry
+- Google container registry
+- Azure container registry
+- local storage
+  `docker load` & `docker save` to save containers locally and copy to customer or to move between storage engine types on same server
+
+```bash
+    docker save -o my-images.tar.gz debian busybox ubuntu:14.04
+    docker rmi debian busybox ubuntu:14.04
+    docker load -i my-images.tar.gz
+    # images are restored
+```
+
+### Orchestration
+
+- many orchestration systems for docker (e.g. kubernetes, rancher, mesosphere)
+- start containers and resart them when they fail
+- allow service discovery so container's services can find each other
+- ensure containers run where they'll have resources they need (storage, RAM, CPU, availability)
+
+#### Docker Compose
+
+- **single** machine coordination of multiple resources
+- designed for testing, development, and staging
+- won't work large systems and dynamic scaling
+- brings up all containers, volumes, and networks in single command
+
+#### [Kubernetes](https://kubernetes.io)
+
+- containers that run programs
+- pods group containers together into an application on same node
+- Services make pods dynamically distributed with built-in discovery
+- labels used for advanced service discovery
+- `kubectl` used for scripting large operations 
+- very flexible overlay network
+- runs well on on-prem HW and in cloud
+
+#### [AWS ECS (EC2 Container Service)](https://aws.amazon.com/ecs)
+
+- Task definition (define a set of containers that run together)
+- Tasks (runs containers in definition on same system)
+- Services and exposure to Net
+  (define 14 copies of a service and it will ensure 14 copies are always running)
+- ties services into AWS ELB for availability
+- user creates their own EC2 instances and join into a ECS cluster by passing docker control socket to ECS agent
+- ECS provides their own repos
+- Containers and tasks can be part of AWS CloudFormation stacks
+
+#### Other Solutions
+
+- AWS Fargate (more automated ECS)
+- Docker Swarm
+- Google Kubernetes Engine (GKS)
+- Azure Kubernetes Engine (AKS)
+
+#### AWS Kubernetes (EKS)
+
+
+
+
+
+
+
+
