@@ -613,15 +613,35 @@ Stores containers:
 - Google Kubernetes Engine (GKS)
 - Azure Kubernetes Engine (AKS)
 
+
 #### AWS Kubernetes (EKS)
 
-You can setup a local cluster with minikube (rather than the video's EKS example).
+A terraform model to setup a cluster on EKS is contained in the following files:
+
+- **aws-eks.tf**
+  creates the cluster within the subnets and sets up cloudwatch logging
+
+- **aws-eks-network.tf**
+  defines the AWS VPC and 2 subnets into which the cluster is created
+
+- **aws-eks-roles.tf**
+  defines the roles for a service account that's required to run the cluster
+
+- **aws-eks-vars.tf**
+  variables used in the above model to configure the cluster (e.g. name)
+
+- **aws-eks-outputs.tf**
+  variables output in the above model when the cluster is created
+
+The entire procedure can be done from the AWS management console by following [these directions](https://docs.aws.amazon.com/eks/latest/userguide/create-cluster.html)
+
+Alternately, you can setup a local cluster with minikube (rather than the video's EKS example).
 
 ```bash
     minikube delete --all --purge
-    minikube config set driver docker
-    minikube start --addons=ingress --cpus=4 --memory=1984m # max memory for hypervisor
-
+    minikube config set driver docker # ssh or virtualbox
+    # max memory for hypervisor hypervisor
+    minikube start --addons=ingress --cpus=4 --memory=1984m 
     minikube addons enable dashboard
     minikube addons enable metrics-server 
     minikube dashboard --url &
@@ -651,10 +671,12 @@ to convert the json files mentioned above into the yaml files included here.
 
 Note the guestbook service is pending because it needs a cluster IP address.
 
-Cleanup the cluster
+Cleanup the minikube cluster
 
 ```bash
     kubectl delete rc/guestbook rc/redis-master rc/redis-slave \
                    svc/guestbook svc/redis-master svc/redis-slave
     kubectl get all
 ```
+
+#### Google Kubernetes Engine (GKE)
