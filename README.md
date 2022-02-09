@@ -2,14 +2,14 @@ Building Docker Doodles
 -----------------------
 
 Building can be done with the original `docker build`, or with the new *BuildKit* application.  The new
-experimental 'buildx' command, which is in nightly builds as well as in the Docker Engine 19.03 release, provides a new, albeit familiar front end to BuildKit similar to the original `docker build` command. BuildKit has some great new added features such as increased performance, and the ability to easily build cross platform.
+experimental 'buildx' command, which is in nightly builds as well as in the Docker Engine 19.03 release, provides a new, albeit familiar front end to BuildKit similar to the original `docker build` command. BuildKit has some great new added features such as increased performance, and the ability to easily build cross-platform.
 
 To build for your own platform with the original docker build command, use:
 
     cd <doodle> && docker build -t <username>/doodle:<doodle> ./
 
-To build cross platform, use the `Dockerfile.cross` file, either with *BuildKit* directly, or with *buildx*.
-With buildx, you'll first need to create a cross platform `builder` instance with:
+To build cross-platform, use the `Dockerfile.cross` file, either with *BuildKit* directly, or with *buildx*.
+With buildx, you'll first need to create a cross-platform `builder` instance with:
 
     docker buildx create --use
 
